@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>RC HUD</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="cam-container">
+    <img id="stream" src="/stream">
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <script src="/hud.js"></script>
+</body>
+</html>

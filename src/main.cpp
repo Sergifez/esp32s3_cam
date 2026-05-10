@@ -1,149 +1,234 @@
 #include <Arduino.h>
-#include "esp_system.h"
-#include "esp_camera.h"
-#include "esp_heap_caps.h"
 #include <WiFi.h>
-#include <WebServer.h>
+#include <LittleFS.h>
+#include <Adafruit_NeoPixel.h>
+#include "esp_http_server.h"
 
-#define PWDN_GPIO_NUM  -1
-#define RESET_GPIO_NUM -1
-#define XCLK_GPIO_NUM  15 // 14
-#define SIOD_GPIO_NUM  4  // 1
-#define SIOC_GPIO_NUM  5  // 2
+// ---------------- LED ----------------
+#define LED_PIN    48
+#define LED_COUNT  1
+#define BRIGHTNESS 50
 
-#define Y2_GPIO_NUM 11
-#define Y3_GPIO_NUM 9
-#define Y4_GPIO_NUM 8
-#define Y5_GPIO_NUM 10
-#define Y6_GPIO_NUM 12
-#define Y7_GPIO_NUM 18
-#define Y8_GPIO_NUM 17
-#define Y9_GPIO_NUM 16
+Adafruit_NeoPixel led(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 
-#define VSYNC_GPIO_NUM 6
-#define HREF_GPIO_NUM  7
-#define PCLK_GPIO_NUM  13
+// ---------------- TELEMETRÍA SIMULADA ----------------
+float sim_speed     = 0;
+float sim_battery   = 100;
+float sim_distance  = 0;
+float sim_rivalDist = 10;
+int   sim_lap       = 1;
 
-const char* ssid = "ESP32_CAM";
-const char* password = "12345678";  // mínimo 8 caracteres
+// ---------------- HTTP SERVER ----------------
+httpd_handle_t httpServer = nullptr;
 
-WebServer server(80);
+// ---------------- UTILIDADES ----------------
+String getContentType(const String &path) {
+    if (path.endsWith(".html")) return "text/html";
+    if (path.endsWith(".css"))  return "text/css";
+    if (path.endsWith(".js"))   return "application/javascript";
+    if (path.endsWith(".png"))  return "image/png";
+    if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+    if (path.endsWith(".ico"))  return "image/x-icon";
+    if (path.endsWith(".json")) return "application/json";
+    return "text/plain";
+}
 
-camera_config_t config = {
-    .pin_pwdn       = PWDN_GPIO_NUM,
-    .pin_reset      = RESET_GPIO_NUM,
-    .pin_xclk       = XCLK_GPIO_NUM,
-    .pin_sscb_sda   = SIOD_GPIO_NUM,
-    .pin_sscb_scl   = SIOC_GPIO_NUM,
+void actualizarSimulacion() {
+    sim_speed += 0.5;
+    if (sim_speed > 260) sim_speed = 0;
 
-    .pin_d7 = Y9_GPIO_NUM,
-    .pin_d6 = Y8_GPIO_NUM,
-    .pin_d5 = Y7_GPIO_NUM,
-    .pin_d4 = Y6_GPIO_NUM,
-    .pin_d3 = Y5_GPIO_NUM,
-    .pin_d2 = Y4_GPIO_NUM,
-    .pin_d1 = Y3_GPIO_NUM,
-    .pin_d0 = Y2_GPIO_NUM,
+    sim_distance += 0.3;
+    if (sim_distance > 9999) sim_distance = 0;
 
-    .pin_vsync = VSYNC_GPIO_NUM,
-    .pin_href  = HREF_GPIO_NUM,
-    .pin_pclk  = PCLK_GPIO_NUM,
+    sim_battery -= 0.01;
+    if (sim_battery < 0) sim_battery = 100;
 
-    .xclk_freq_hz = 20000000,
-    .ledc_timer   = LEDC_TIMER_0,
-    .ledc_channel = LEDC_CHANNEL_0,
+    sim_rivalDist = 5 + 5 * sin(millis() / 1000.0);
+}
 
-    .pixel_format = PIXFORMAT_JPEG,
-    .frame_size   = FRAMESIZE_QVGA,
-    .jpeg_quality = 12,
-    .fb_count     = 1,
-    .fb_location = CAMERA_FB_IN_PSRAM,
-    .grab_mode = CAMERA_GRAB_WHEN_EMPTY
-};
+// ---------------- HANDLERS HTTP ----------------
 
+// /telemetry
+esp_err_t telemetry_handler(httpd_req_t *req) {
+    actualizarSimulacion();
+
+    String json = "{";
+    json += "\"speed\":"     + String(sim_speed, 1)     + ",";
+    json += "\"battery\":"   + String(sim_battery, 1)   + ",";
+    json += "\"lap\":"       + String(sim_lap)          + ",";
+    json += "\"distance\":"  + String(sim_distance, 1)  + ",";
+    json += "\"rivalDist\":" + String(sim_rivalDist, 1);
+    json += "}";
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
+// /led
+esp_err_t led_handler(httpd_req_t *req) {
+    char buf[64];
+    int len = httpd_req_get_url_query_len(req) + 1;
+    String color;
+
+    if (len > 1 && len < (int)sizeof(buf)) {
+        if (httpd_req_get_url_query_str(req, buf, len) == ESP_OK) {
+            char param[16];
+            if (httpd_query_key_value(buf, "color", param, sizeof(param)) == ESP_OK) {
+                color = String(param);
+            }
+        }
+    }
+
+    if (color == "red") {
+        led.setPixelColor(0, led.Color(255, 0, 0));
+    } else if (color == "green") {
+        led.setPixelColor(0, led.Color(0, 255, 0));
+    } else {
+        led.setPixelColor(0, led.Color(0, 0, 0));
+    }
+    led.show();
+
+    const char *resp = "OK";
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, resp, strlen(resp));
+    return ESP_OK;
+}
+
+// (opcional) /stream – placeholder sin cámara
+esp_err_t stream_handler(httpd_req_t *req) {
+    const char *msg = "Stream no implementado aún";
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, msg, strlen(msg));
+    return ESP_OK;
+}
+
+// estáticos desde LittleFS: /* (default index.html)
+esp_err_t static_handler(httpd_req_t *req) {
+    String uri = String(req->uri);  // p.ej. "/", "/style.css", "/img/fondo2.jpg"
+
+    if (uri == "/") uri = "/index.html";
+
+    String path = uri; // LittleFS raíz
+    if (!LittleFS.exists(path)) {
+        const char *msg = "404 Not Found";
+        httpd_resp_set_status(req, "404 NOT FOUND");
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_send(req, msg, strlen(msg));
+        return ESP_OK;
+    }
+
+    File file = LittleFS.open(path, "r");
+    if (!file) {
+        const char *msg = "500 Internal Error";
+        httpd_resp_set_status(req, "500 INTERNAL SERVER ERROR");
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_send(req, msg, strlen(msg));
+        return ESP_OK;
+    }
+
+    String contentType = getContentType(path);
+    httpd_resp_set_type(req, contentType.c_str());
+
+    uint8_t buffer[1024];
+    while (true) {
+        size_t readBytes = file.read(buffer, sizeof(buffer));
+        if (readBytes <= 0) break;
+        if (httpd_resp_send_chunk(req, (const char *)buffer, readBytes) != ESP_OK) {
+            file.close();
+            httpd_resp_send_chunk(req, nullptr, 0);
+            return ESP_FAIL;
+        }
+    }
+    file.close();
+    httpd_resp_send_chunk(req, nullptr, 0);
+    return ESP_OK;
+}
+
+// ---------------- INICIO HTTP SERVER ----------------
+void startHttpServer() {
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.server_port = 80;
+    config.uri_match_fn = httpd_uri_match_wildcard;
+
+    if (httpd_start(&httpServer, &config) == ESP_OK) {
+        // /telemetry
+        httpd_uri_t telemetry_uri = {
+            .uri      = "/telemetry",
+            .method   = HTTP_GET,
+            .handler  = telemetry_handler,
+            .user_ctx = nullptr
+        };
+        httpd_register_uri_handler(httpServer, &telemetry_uri);
+
+        // /led
+        httpd_uri_t led_uri = {
+            .uri      = "/led",
+            .method   = HTTP_GET,
+            .handler  = led_handler,
+            .user_ctx = nullptr
+        };
+        httpd_register_uri_handler(httpServer, &led_uri);
+
+        // /stream (placeholder)
+        httpd_uri_t stream_uri = {
+            .uri      = "/stream",
+            .method   = HTTP_GET,
+            .handler  = stream_handler,
+            .user_ctx = nullptr
+        };
+        httpd_register_uri_handler(httpServer, &stream_uri);
+
+        // estáticos: wildcard
+        httpd_uri_t static_uri = {
+            .uri      = "/*",
+            .method   = HTTP_GET,
+            .handler  = static_handler,
+            .user_ctx = nullptr
+        };
+        httpd_register_uri_handler(httpServer, &static_uri);
+
+        Serial.println("HTTP server iniciado");
+    } else {
+        Serial.println("Error iniciando HTTP server");
+    }
+}
+
+// ---------------- WIFI AP ----------------
 void iniciarWiFiAP() {
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(ssid, password);
-
-  IPAddress IP = WiFi.softAPIP();
-  Serial.print("WiFi creada. IP: ");
-  Serial.println(IP);
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP("ESP32_TEST", "12345678");
+    Serial.print("AP IP: ");
+    Serial.println(WiFi.softAPIP());
 }
 
-void streamMJPEG() {
-  WiFiClient client = server.client();
-  String boundary = "frame";
-
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: multipart/x-mixed-replace; boundary=" + boundary);
-  client.println();
-
-  while (client.connected()) {
-    camera_fb_t *fb = esp_camera_fb_get();
-    if (!fb) continue;
-
-    client.printf("--%s\r\n", boundary.c_str());
-    client.println("Content-Type: image/jpeg");
-    client.printf("Content-Length: %u\r\n\r\n", fb->len);
-    client.write(fb->buf, fb->len);
-    client.println();
-
-    esp_camera_fb_return(fb);
-    delay(50);  // ~20 FPS
-  }
-}
-
-void setupServidor() {
-  server.on("/", HTTP_GET, []() {
-    server.send(200, "text/html",
-      "<html><body>"
-      "<h1>ESP32-CAM</h1>"
-      "<img src='/stream'>"
-      "</body></html>"
-    );
-  });
-
-  server.on("/stream", HTTP_GET, streamMJPEG);
-  server.begin();
-}
-
+// ---------------- SETUP / LOOP ----------------
 void setup() {
-  Serial.begin(115200);
-  delay(1000);
+    Serial.begin(115200);
+    delay(300);
 
-  if (psramFound()) {
-    Serial.println("=== PSRAM INFO ===");
-    Serial.println("PSRAM detectada");
-    Serial.printf("Tamaño PSRAM: %d bytes\n", ESP.getPsramSize());
-    Serial.printf("Heap interno libre: %d\n", ESP.getFreeHeap());
-    Serial.printf("PSRAM libre: %d\n", ESP.getFreePsram());
-  } else {
-    Serial.println("=== PSRAM INFO ===");
-    Serial.println("PSRAM NO detectada");
-  }
+    led.begin();
+    led.setBrightness(BRIGHTNESS);
+    led.clear();
+    led.show();
 
-  esp_err_t err = esp_camera_init(&config);
-  if (err != ESP_OK) {
-    Serial.printf("❌ Error cámara: 0x%x\n", err);
-    return;
-  }
+    if (!LittleFS.begin(true)) {
+        Serial.println("Error montando LittleFS");
+    } else {
+        Serial.println("LittleFS OK");
+        Serial.println("Listado LittleFS:");
+        File root = LittleFS.open("/");
+        File file = root.openNextFile();
+        while (file) {
+            Serial.println(file.name());
+            file = root.openNextFile();
+        }
+    }
 
-  sensor_t *s = esp_camera_sensor_get();
-  if (!s) {
-    Serial.println("❌ Sensor NULL");
-    return;
-  }
-
-  Serial.printf("✅ PID cámara: 0x%02X\n", s->id.PID);
-  
-  iniciarWiFiAP();
-
-  setupServidor();
-
-  Serial.println("Cámara IP lista");
-  Serial.println("Abre: http://192.168.4.1");
+    iniciarWiFiAP();
+    startHttpServer();
 }
 
 void loop() {
-  server.handleClient();
+    // Nada: todo lo maneja el servidor HTTP y las interrupciones
 }

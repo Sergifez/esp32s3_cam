@@ -1,0 +1,54 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+body {
+  font-family: 'Orbitron', sans-serif;
+}
+
+#cam-container {
+  position: relative;
+  width: 100vw;
+  height: auto;
+}
+
+#stream {
+  width: 100vw;   /* La imagen SIEMPRE ocupa el ancho */
+  height: auto;   /* Mantiene proporción */
+  display: block;
+}
+
+#overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+#controls {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 20px;
+}
+
+#controls button {
+  padding: 12px 20px;
+  font-size: 18px;
+  font-family: 'Orbitron', sans-serif;
+  background: #222;
+  color: #0ff;
+  border: 2px solid #0ff;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+#controls button:active {
+  background: #0ff;
+  color: #000;
+}

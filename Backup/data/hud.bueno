@@ -1,0 +1,99 @@
+const img = document.getElementById('stream');
+const canvas = document.getElementById('overlay');
+const ctx = canvas.getContext('2d');
+
+let hud = {
+  speed: 0,
+  battery: 100,
+  lap: 1,
+  distance: 0,
+  rivalDist: 0
+};
+
+function resizeCanvas() {
+  canvas.width  = img.clientWidth;
+  canvas.height = img.clientHeight;
+  canvas.style.left = img.offsetLeft + "px";
+  canvas.style.top  = img.offsetTop + "px";
+}
+
+window.onresize = resizeCanvas;
+img.onload = resizeCanvas;
+
+function drawHUD() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+
+  // === Retícula central estilo dron ===
+  ctx.strokeStyle = "rgba(0,255,0,0.7)";
+  ctx.lineWidth = 2;
+
+  ctx.beginPath();
+  ctx.moveTo(cx - 50, cy);
+  ctx.lineTo(cx - 20, cy);
+  ctx.moveTo(cx + 20, cy);
+  ctx.lineTo(cx + 50, cy);
+
+  ctx.moveTo(cx, cy - 50);
+  ctx.lineTo(cx, cy - 20);
+  ctx.moveTo(cx, cy + 20);
+  ctx.lineTo(cx, cy + 50);
+  ctx.stroke();
+
+  // === Indicadores laterales ===
+  const barH = 250;
+
+  // Velocidad izquierda
+  let speedRatio = hud.speed / 40;
+  ctx.strokeStyle = "#0f0";
+  ctx.strokeRect(30, cy - barH/2, 20, barH);
+  ctx.fillStyle = "#0f0";
+  ctx.fillRect(30, cy + barH/2 - barH * speedRatio, 20, barH * speedRatio);
+
+  ctx.font = "20px Orbitron";
+  ctx.fillText("VEL", 25, cy - barH/2 - 10);
+
+  // Batería derecha
+  let batRatio = hud.battery / 100;
+  ctx.strokeRect(canvas.width - 50, cy - barH/2, 20, barH);
+  ctx.fillStyle = hud.battery > 20 ? "#0f0" : "#f00";
+  ctx.fillRect(canvas.width - 50, cy + barH/2 - barH * batRatio, 20, barH * batRatio);
+
+  ctx.fillStyle = "#0f0";
+  ctx.fillText("BAT", canvas.width - 65, cy - barH/2 - 10);
+
+  // === Barra inferior ===
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(0, canvas.height - 100, canvas.width, 100);
+
+  ctx.fillStyle = "#0f0";
+  ctx.font = "26px Orbitron";
+
+  ctx.fillText("VEL: " + hud.speed.toFixed(1) + " km/h", 20, canvas.height - 60);
+  ctx.fillText("BAT: " + hud.battery.toFixed(0) + " %", 20, canvas.height - 25);
+
+  ctx.fillText("VUELTA: " + hud.lap, cx - 80, canvas.height - 60);
+  ctx.fillText("DIST: " + hud.distance.toFixed(1) + " m", cx - 80, canvas.height - 25);
+
+  ctx.fillStyle = "#ffcc00";
+  ctx.fillText("RIVAL: " + hud.rivalDist.toFixed(1) + " m", canvas.width - 260, canvas.height - 40);
+
+  requestAnimationFrame(drawHUD);
+}
+drawHUD();
+
+async function updateTelemetry() {
+  try {
+    const r = await fetch("/telemetry");
+    const data = await r.json();
+    hud.speed     = data.speed;
+    hud.battery   = data.battery;
+    hud.lap       = data.lap;
+    hud.distance  = data.distance;
+    hud.rivalDist = data.rivalDist;
+  } catch (e) {}
+}
+
+setInterval(updateTelemetry, 200);

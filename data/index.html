@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>HUD</title>
+  <link rel="stylesheet" href="/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="cam-container">
+    <!-- Cuando quieras activar el stream real, cambia fondo2.jpg por /stream -->
+    <img id="stream" src="/img/fondo2.jpg">
+    <canvas id="overlay"></canvas>
+
+    <div id="controls">
+      <button id="btn-left">◀ Izquierda</button>
+      <button id="btn-right">Derecha ▶</button>
+    </div>
+  </div>
+
+  <script src="/hud.js"></script>
+</body>
+</html>
+
